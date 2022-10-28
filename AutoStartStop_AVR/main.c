@@ -5,11 +5,17 @@
  * Author : josefe
  */ 
 
+#define F_CPU 8000000UL
+
 #include <avr/io.h>
+#include <avr/interrupt.h>
+#include <avr/eeprom.h>
 
 #define BUTTON_NO_PRESS 0
 #define BUTTON_SHORT_PRESS 1
 #define BUTTON_LONG_PRESS 2
+
+#define EEPROM_ADDRESS 0
 
 enum ButtonFSMStates
 {
@@ -39,26 +45,42 @@ void initUserButton();
 uint8_t processUserButton();
 // Read the user side button line
 uint8_t readButtonRaw();
+// Read the EEPROM contains and update the flags
+void readEEPROM(uint8_t* autoStarStopExpectedStatusPointer, uint8_t* switchOverrideModePointer);
+// Write the flag contents to the EEPROM
+void writeEEPROM(uint8_t autoStarStopExpectedStatusValue, uint8_t switchOverrideModeValue);
+// Compute the number of 1's in a byte
+uint8_t countOnes(uint8_t number);
+// Configures the Timer 1 for system tick millis operation
+void initTimerMillis();
 
 enum ButtonFSMStates userButtonState;
+volatile uint16_t millisCount;
 
 int main(void)
 {
 	volatile uint8_t autoStarStopExpectedStatus;
 	volatile uint8_t switchOverrideMode;
+	volatile uint8_t userButtonStatus;
+	volatile uint8_t markEEPROMForUpdate;
 		
 	// Init GPIO	
 	// TODO
 	// ENABLE PULLUPS
 	PORTB = (1 << PB1) | (1 << PB2);
 	DDRB = (1 << PB4) | (1 << PB1);
+	releaseButton();
+	turnLEDOff();
 	// Read EEPROM
-	// TODO
-	// switchOverrrideMode and autoStarStopExpectedStatus	
+	readEEPROM((uint8_t*) &autoStarStopExpectedStatus, (uint8_t*) &switchOverrideMode);
+	markEEPROMForUpdate = 0;	
+	// Tick timer init
+	millisCount = 0;
+	sei();
 	void initUserButton(); // FSM init
     while (1) 
     {
-		volatile uint8_t userButtonStatus = (volatile uint8_t) processUserButton();			
+		userButtonStatus = (volatile uint8_t) processUserButton();			
 		
 		switch (userButtonStatus)
 		{
@@ -71,11 +93,9 @@ int main(void)
 				{
 					switchOverrideMode = 1;
 				}
-				// TODO
-				// Store switchOverrrideMode in EEPROM
+				markEEPROMForUpdate = 1;
 			break;	
-			case BUTTON_SHORT_PRESS:
-		//if (userButtonStatus == BUTTON_SHORT_PRESS && !switchOverrrideMode)		
+			case BUTTON_SHORT_PRESS:				
 				if (!switchOverrideMode)
 				{
 					if (autoStarStopExpectedStatus)
@@ -86,11 +106,10 @@ int main(void)
 					{
 						autoStarStopExpectedStatus = 1;
 					}
-					// TODO
-					// Store autoStarStopExpectedStatus in EEPROM
-				break;
+					markEEPROMForUpdate = 1;
+					break;
 				}
-			// If override mode continues with next case			
+			// If in override mode, continues with next case			
 			case BUTTON_NO_PRESS:
 			default:
 				if (switchOverrideMode)
@@ -130,6 +149,12 @@ int main(void)
 			 
 				}
 			break;
+		}
+		// EEPROM is only written if is marked for update and data have changed
+		if (markEEPROMForUpdate && (eeprom_is_ready()))
+		{
+			writeEEPROM(autoStarStopExpectedStatus,switchOverrideMode);
+			markEEPROMForUpdate = 0;			
 		}
     }
 }
@@ -172,33 +197,33 @@ void turnLEDOff()
 
 void initUserButton()
 {
-	userButtonState = ButtonFSMStates.BUTTON_IDLE;
+	userButtonState = BUTTON_IDLE;
 }
 
 uint8_t processUserButton()
 {
 	switch (userButtonState)
 	{
-		case ButtonFSMStates.BUTTON_IDLE:
+		case BUTTON_IDLE:
 			if (!readButtonRaw()) // Low enabled, button pressed
 			{
-				userButtonState = ButtonFSMStates.BUTTON_PRESSED;
+				userButtonState = BUTTON_PRESSED;
 				//TODO
 				//Start timer
 				return BUTTON_NO_PRESS;
 			}
 			else
 			{
-				userButtonState = ButtonFSMStates.BUTTON_IDLE;
+				userButtonState = BUTTON_IDLE;
 				//TODO
 				//Stop timer
 				return BUTTON_NO_PRESS;
 			}
 		break;
-		case ButtonFSMStates.BUTTON_PRESSED:
+		case BUTTON_PRESSED:
 			if (0) // TODO check timer overflow true
 			{
-				userButtonState = ButtonFSMStates.BUTTON_RELEASE_PENDING;
+				userButtonState = BUTTON_RELEASE_PENDING;
 				// TODO
 				//Stop timer
 				return BUTTON_LONG_PRESS;				
@@ -207,29 +232,29 @@ uint8_t processUserButton()
 			{
 				if (!readButtonRaw()) // Low enabled, button pressed
 				{
-					userButtonState = ButtonFSMStates.BUTTON_PRESSED;
+					userButtonState = BUTTON_PRESSED;
 					return BUTTON_NO_PRESS;
 				}
 				else
 				{
-					userButtonState = ButtonFSMStates.BUTTON_IDLE;
+					userButtonState = BUTTON_IDLE;
 					//TODO
 					//Stop timer
 					return BUTTON_SHORT_PRESS;
 				}
 			}
 		break;
-		case ButtonFSMStates.BUTTON_RELEASE_PENDING:
+		case BUTTON_RELEASE_PENDING:
 			if (!readButtonRaw()) // Low enabled, button pressed
 			{
-				userButtonState = ButtonFSMStates.BUTTON_RELEASE_PENDING;
+				userButtonState = BUTTON_RELEASE_PENDING;
 				// TODO
 				//Stop timer
 				return BUTTON_NO_PRESS;
 			}
 			else
 			{
-				userButtonState = ButtonFSMStates.BUTTON_IDLE;
+				userButtonState = BUTTON_IDLE;
 				//TODO
 				//Stop timer
 				return BUTTON_NO_PRESS;
@@ -243,4 +268,70 @@ uint8_t processUserButton()
 uint8_t readButtonRaw()
 {
 	return (PINB & (1 << PB1)); // Low enabled, button pressed
+}
+
+
+void readEEPROM(uint8_t* autoStarStopExpectedStatusPointer, uint8_t* switchOverrideModePointer)
+{
+	uint8_t value = eeprom_read_byte((uint8_t*) EEPROM_ADDRESS);
+	uint8_t lowerNibble = value & 0x0F;
+	uint8_t upperNibble = (value >> 4) & 0x0F;	
+	if (countOnes(lowerNibble) > 2)
+	{
+		(*autoStarStopExpectedStatusPointer) = 1;
+	}
+	else
+	{
+		(*autoStarStopExpectedStatusPointer) = 0;
+	}
+	if (countOnes(upperNibble) > 2)
+	{
+		(*switchOverrideModePointer) = 1;
+	}
+	else
+	{
+		(*switchOverrideModePointer) = 0;
+	}
+}
+
+void writeEEPROM(uint8_t autoStarStopExpectedStatusValue, uint8_t switchOverrideModeValue)
+{
+	uint8_t value = 0;
+	if (autoStarStopExpectedStatusValue)
+	{
+		value |= 0x0F;
+	}
+	if (switchOverrideModeValue)
+	{
+		value |= 0xF0;
+	}
+	eeprom_update_byte((uint8_t*) EEPROM_ADDRESS, value);
+}
+
+uint8_t countOnes(uint8_t number)
+{
+	uint8_t count = 0;
+	for (uint8_t index = 0; index < 7; ++index)
+	{
+		if (number & (1 << index))
+		{
+			++count;
+		}
+	}
+	return count;
+}
+
+void initTimerMillis()
+{
+	GTCCR = (1 << PSR1); // Clear prescaler
+	TCNT1 = 0; // Clear counter
+	OCR1A = 125; // Set count
+	TIFR = (1 << OCF1A); // Clear IF
+	TIMSK = (1 << OCIE1A); // Enable interrupts
+	TCCR1 = (1 << CTC1) | 3; // /64 prescaler and CTC	
+}
+
+ISR(TIMER1_COMPA_vect)
+{
+	++millisCount;
 }
