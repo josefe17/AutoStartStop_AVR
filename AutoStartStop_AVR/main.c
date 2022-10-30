@@ -23,6 +23,7 @@
 #define BUTTON_FSM_DELAY_MILLIS 50
 #define PULSE_FSM_DELAY_MILLIS 1
 
+#define BUTTON_DEBOUNCE_DURATION_MILLIS 50
 #define BUTTON_LONG_PRESS_DURATION_MILLIS 4000
 
 #define PULSE_DURATION_TIME_MILLIS 250
@@ -32,7 +33,9 @@ enum ButtonFSMStates
 {
 	BUTTON_IDLE,
 	BUTTON_PRESSED,
+	BUTTON_PRESSED_DEBOUNCE,
 	BUTTON_RELEASE_PENDING,
+	BUTTON_RELEASE_DEBOUNCE,
 	BUTTON_DEPRESSED
 };
 
@@ -49,10 +52,14 @@ uint8_t readButtonRaw();
 void holdButton();
 // set the start stop button signal depressed
 void releaseButton();
+// Set the button signal according to the user button
+void forwardButton();
 // Turn feedback LED output on
 void turnLEDOn();
 // Turn feedback LED output off
 void turnLEDOff();
+// Controls the LED according to the feedback line status
+void forwardLED();
 
 /* Pulse FSM functions */
 // Init FSM
@@ -68,7 +75,7 @@ uint8_t isPulseOngoing();
 // Configure the input button FSM variables
 void initUserButton();
 // Run the user side button FSM machine
-uint8_t processUserButton();
+void processUserButton();
 
 /*EEPROM functions*/
 // Read the EEPROM contains and update the flags
@@ -90,39 +97,37 @@ uint8_t checkDelayUntil(uint16_t instant);
 enum ButtonFSMStates userButtonState;
 // Pulse output FSM state
 enum ButtonFSMStates pulseButtonState;
-// Time instant when to fire the button FSM again
-uint16_t buttonFSMEndOfDelayTime;
-// Time instant when to fire the pulse FSM again
-uint16_t pulseFSMEndOfDelayTime;
+
+// Stores the ASS consigned value that must coincide with the system one
+volatile uint8_t autoStarStopExpectedStatus;
+// Stores if the switch operating mode has changed
+volatile uint8_t switchOverrideMode;
+// Set if there were any changes to the NVM contents and writing is required
+volatile uint8_t markEEPROMForUpdate;
+// Counter of the number of pending pulse requests
+volatile uint8_t pulseRequests;
+
 // Time instant when the simulated button depression ends
 uint16_t pulseDurationEndingTime;
 // Time instant when the simulated button settling time ends
 uint16_t pulseSettleEndingTime;
-// Time instant when a button pressure is considered a long press
-uint16_t buttonLongPressMinimumThresholdTime;
-// Counter of the number of pending pulse requests
-uint8_t pulseRequests;
+// Time instant when a button pressure is considered valid short or long press
+uint16_t buttonPressMinimumThresholdTime;
 
 // Timer postscaler / counter
 volatile uint16_t millisCount;
 
 int main(void)
 {
-	volatile uint8_t autoStarStopExpectedStatus;
-	volatile uint8_t switchOverrideMode;
-	volatile uint8_t userButtonStatus;
-	volatile uint8_t markEEPROMForUpdate;
 		
 	// Init GPIO	
-	// TODO
-	// ENABLE PULLUPS
+	MCUCR &= ~(1 << PUD);
 	PORTB = (1 << PB1) | (1 << PB2);
 	DDRB = (1 << PB4) | (1 << PB1);
 	releaseButton();
 	turnLEDOff();
 	// Read EEPROM
-	readEEPROM((uint8_t*) &autoStarStopExpectedStatus, (uint8_t*) &switchOverrideMode);
-	markEEPROMForUpdate = 0;	
+	readEEPROM((uint8_t*) &autoStarStopExpectedStatus, (uint8_t*) &switchOverrideMode);		
 	// Tick timer init
 	millisCount = 0;	
 	initTimerMillis();
@@ -131,86 +136,23 @@ int main(void)
 	initPulse();
     while (1) 
     {
-		userButtonStatus = (volatile uint8_t) processUserButton();			
+		// Read button
+		processUserButton();			
 		
-		switch (userButtonStatus)
+		// If the system is in override mode
+		if (switchOverrideMode)
 		{
-			case BUTTON_LONG_PRESS:		
-				if (switchOverrideMode)
-				{
-					switchOverrideMode = 0;
-				}
-				else
-				{
-					switchOverrideMode = 1;
-				}
-				markEEPROMForUpdate = 1;
-			break;	
-			case BUTTON_SHORT_PRESS:				
-				if (!switchOverrideMode)
-				{
-					if (autoStarStopExpectedStatus)
-					{
-						autoStarStopExpectedStatus = 0;
-					}
-					else
-					{
-						autoStarStopExpectedStatus = 1;
-					}
-					markEEPROMForUpdate = 1;
-					break;
-				}
-			// If in override mode, continues with next case	
-			// If the button wasn't pressed		
-			// TODO
-			// move to pulse FSM
-			case BUTTON_NO_PRESS:
-			default:
-				// If the system is in override mode
-				if (switchOverrideMode)
-				{
-					// Pass the button and LED actions
-					if (!readButtonRaw())
-					{
-						holdButton();				
-					}
-					else
-					{
-						releaseButton();
-					}
-					if (readAutoStartStopCurrentStatus())
-					{
-						turnLEDOff();
-					}
-					else
-					{
-						turnLEDOn();
-					}
-				}
-				// Else handle the pulse
-				else
-				{	// If ASS feedback and expected status mismatch and not ongoing pulse, pulse the line
-					if (((!readAutoStartStopCurrentStatus() && autoStarStopExpectedStatus) //ASS off but required on
-						|| (readAutoStartStopCurrentStatus() && !autoStarStopExpectedStatus)) // ASS on but required off
-						&& !isPulseOngoing()) // No ongoing pulse
-					{
-						pulseButton();			
-					}
-					// Forward the LED
-					if (readAutoStartStopCurrentStatus())
-					{
-						turnLEDOff();
-					}
-					else
-					{
-						turnLEDOn();
-					}
-			 
-				}
-			break;
+			// Button control is forwarded
+			forwardButton();
 		}
+		// Else handle the pulse
+		else
+		{
+			pulseButton();
+		}
+		// Forward the LED
+		forwardLED();
 		// Process the button pulses
-		// TODO check disabling mode
 		processPulse();
 		// EEPROM is only written if is marked for update and data have changed
 		if (markEEPROMForUpdate && (eeprom_is_ready()))
@@ -232,19 +174,35 @@ uint8_t readAutoStartStopCurrentStatus() // 0 for LED on so ASS off
 
 void pulseButton()
 {
-	++pulseRequests;
+	// If ASS feedback and expected status mismatch and not ongoing pulse, pulse the line
+	if (((!readAutoStartStopCurrentStatus() && autoStarStopExpectedStatus) //ASS off but required on
+	|| (readAutoStartStopCurrentStatus() && !autoStarStopExpectedStatus)) // ASS on but required off
+	&& !isPulseOngoing()) // No ongoing pulse
+	{
+		++pulseRequests;
+	}	
 }
 
 void holdButton()
 {
-	// TODO
-	//Check wether to stop pulse timer here
 	PORTB |= (1 << PB4);
 }
 
 void releaseButton()
 {
 	PORTB &= ~(1 << PB4);
+}
+
+void forwardButton()
+{
+	if (!readButtonRaw())
+	{
+		holdButton();
+	}
+	else
+	{
+		releaseButton();
+	}
 }
 
 void turnLEDOn()
@@ -257,70 +215,77 @@ void turnLEDOff()
 	PORTB |= (1 << PB1);
 }
 
+void forwardLED()
+{
+	if (readAutoStartStopCurrentStatus())
+	{
+		turnLEDOff();
+	}
+	else
+	{
+		turnLEDOn();
+	}
+}
+
 void initPulse()
 {
-	pulseButtonState = BUTTON_IDLE;
-	pulseFSMEndOfDelayTime = 0;
+	pulseButtonState = BUTTON_IDLE;	
 	pulseRequests = 0;
 }
 
 void processPulse()
 {
-	if (checkDelayUntil(pulseFSMEndOfDelayTime))
+	switch (pulseButtonState)
 	{
-		pulseFSMEndOfDelayTime = readTimerMillis() + PULSE_FSM_DELAY_MILLIS;
-		switch (pulseButtonState)
-		{
-			case BUTTON_IDLE:
-				if (pulseRequests > 0) // Low enabled, button pressed
-				{
-					--pulseRequests;
-					pulseButtonState = BUTTON_PRESSED;
-					pulseDurationEndingTime = readTimerMillis() + PULSE_DURATION_TIME_MILLIS;					
-					holdButton();			
-					break;
-				}
-				else
-				{
-					pulseButtonState = BUTTON_IDLE;			
-					break;
-				}
+		case BUTTON_IDLE:
+			if (pulseRequests > 0) // Low enabled, button pressed
+			{
+				--pulseRequests;
+				pulseButtonState = BUTTON_PRESSED;
+				pulseDurationEndingTime = readTimerMillis() + PULSE_DURATION_TIME_MILLIS;					
+				holdButton();			
 				break;
-			case BUTTON_PRESSED:
-				if (checkDelayUntil(pulseDurationEndingTime))
-				{
-					pulseButtonState = BUTTON_DEPRESSED;
-					pulseSettleEndingTime = readTimerMillis() + PULSE_SETTLING_TIME_MILLIS;
-					releaseButton();					
-					break;
-				}
-				else
-				{
-					pulseButtonState = BUTTON_PRESSED;
-					holdButton();								
-					break;
-				}
+			}
+			else
+			{
+				pulseButtonState = BUTTON_IDLE;			
 				break;
-			case BUTTON_DEPRESSED:
-				if (checkDelayUntil(pulseSettleEndingTime))
-				{
-					pulseButtonState = BUTTON_IDLE;
-					releaseButton();					
-					break;
-				}
-				else
-				{
-					pulseButtonState = BUTTON_DEPRESSED;
-					releaseButton();
-					break;
-				}
-				break;
-			default:
+			}
+			break;
+		case BUTTON_PRESSED:
+			if (checkDelayUntil(pulseDurationEndingTime))
+			{
 				pulseButtonState = BUTTON_DEPRESSED;
 				pulseSettleEndingTime = readTimerMillis() + PULSE_SETTLING_TIME_MILLIS;
+				releaseButton();					
+				break;
+			}
+			else
+			{
+				pulseButtonState = BUTTON_PRESSED;
+				holdButton();								
+				break;
+			}
+			break;
+		case BUTTON_DEPRESSED:
+			if (checkDelayUntil(pulseSettleEndingTime))
+			{
+				pulseButtonState = BUTTON_IDLE;
+				releaseButton();					
+				break;
+			}
+			else
+			{
+				pulseButtonState = BUTTON_DEPRESSED;
 				releaseButton();
-				break;			
-		}
+				break;
+			}
+			break;
+		default:
+			pulseButtonState = BUTTON_DEPRESSED;
+			pulseSettleEndingTime = readTimerMillis() + PULSE_SETTLING_TIME_MILLIS;
+			releaseButton();
+			break;			
 	}
 }
 
@@ -339,75 +304,134 @@ uint8_t isPulseOngoing()
 void initUserButton()
 {
 	userButtonState = BUTTON_IDLE;
-	buttonFSMEndOfDelayTime = 0;
+	markEEPROMForUpdate = 0;
 }
 
-uint8_t processUserButton()
+void processUserButton()
 {
-	uint8_t returnValue = BUTTON_NO_PRESS;
-	if (checkDelayUntil(buttonFSMEndOfDelayTime))
+	switch (userButtonState)
 	{
-		buttonFSMEndOfDelayTime = readTimerMillis() + BUTTON_FSM_DELAY_MILLIS;
-		switch (userButtonState)
-		{
-			case BUTTON_IDLE:
+		case BUTTON_IDLE:
+			if (!readButtonRaw()) // Low enabled, button pressed
+			{
+				userButtonState = BUTTON_PRESSED_DEBOUNCE;
+				buttonPressMinimumThresholdTime = readTimerMillis() + BUTTON_DEBOUNCE_DURATION_MILLIS;
+				break;
+			}
+			else
+			{
+				userButtonState = BUTTON_IDLE;
+				break;
+			}
+		break;
+		case BUTTON_PRESSED_DEBOUNCE:
+			if (checkDelayUntil(buttonPressMinimumThresholdTime))
+			{
 				if (!readButtonRaw()) // Low enabled, button pressed
 				{
 					userButtonState = BUTTON_PRESSED;
-					buttonLongPressMinimumThresholdTime = readTimerMillis() + BUTTON_LONG_PRESS_DURATION_MILLIS;
-					returnValue = BUTTON_NO_PRESS;
+					buttonPressMinimumThresholdTime = readTimerMillis() + BUTTON_LONG_PRESS_DURATION_MILLIS - BUTTON_DEBOUNCE_DURATION_MILLIS;
 					break;
 				}
 				else
 				{
 					userButtonState = BUTTON_IDLE;
-					returnValue = BUTTON_NO_PRESS;
 					break;
-				}
-			break;
-			case BUTTON_PRESSED:
-				if (checkDelayUntil(buttonLongPressMinimumThresholdTime))
+				}										
+			}
+			else
+			{
+				userButtonState = BUTTON_PRESSED_DEBOUNCE;
+			}
+		break;
+		case BUTTON_PRESSED:
+			if (checkDelayUntil(buttonPressMinimumThresholdTime))
+			{
+				userButtonState = BUTTON_RELEASE_PENDING;					
+				if (switchOverrideMode)
 				{
-					userButtonState = BUTTON_RELEASE_PENDING;
-					returnValue = BUTTON_LONG_PRESS;
-					break;
-				}
-				else
-				{
-					if (!readButtonRaw()) // Low enabled, button pressed
+					switchOverrideMode = 0;
+					// Swap expected status to force a Auto start stop toogle
+					// and make LED blink (first change by BCM, second by the forced one)
+					if (readAutoStartStopCurrentStatus())
 					{
-						userButtonState = BUTTON_PRESSED;
-						returnValue = BUTTON_NO_PRESS;
-						break;
+						autoStarStopExpectedStatus = 0;
 					}
 					else
 					{
-						userButtonState = BUTTON_IDLE;
-						returnValue = BUTTON_SHORT_PRESS;
-						break;
+						autoStarStopExpectedStatus = 1;
 					}
 				}
-			break;
-			case BUTTON_RELEASE_PENDING:
-				if (!readButtonRaw())
+				else
 				{
-					userButtonState = BUTTON_RELEASE_PENDING;
-					returnValue = BUTTON_NO_PRESS;
+					switchOverrideMode = 1;
+				}
+				markEEPROMForUpdate = 1;					
+				break;
+			}
+			else
+			{
+				if (!readButtonRaw()) // Low enabled, button pressed
+				{
+					userButtonState = BUTTON_PRESSED;
 					break;
 				}
 				else
 				{
 					userButtonState = BUTTON_IDLE;
-					returnValue = BUTTON_NO_PRESS;
+					if (!switchOverrideMode)
+					{
+						if (autoStarStopExpectedStatus)
+						{
+							autoStarStopExpectedStatus = 0;
+						}
+						else
+						{
+							autoStarStopExpectedStatus = 1;
+						}
+						markEEPROMForUpdate = 1;
+					}
 					break;
 				}
-			 break;
-			 default:
-				returnValue = BUTTON_NO_PRESS;
+			}
+		break;
+		case BUTTON_RELEASE_PENDING:
+			if (!readButtonRaw())
+			{
+				userButtonState = BUTTON_RELEASE_PENDING;
 				break;
-		}		
-	}
-	return returnValue;
+			}
+			else
+			{
+				userButtonState = BUTTON_RELEASE_DEBOUNCE;
+				buttonPressMinimumThresholdTime = readTimerMillis() + BUTTON_DEBOUNCE_DURATION_MILLIS;
+				break;
+			}
+			break;
+			case BUTTON_RELEASE_DEBOUNCE:
+			if (checkDelayUntil(buttonPressMinimumThresholdTime))
+			{
+				if (readButtonRaw())
+				{
+						
+					userButtonState = BUTTON_IDLE;
+					break;
+				}
+				else
+				{
+					userButtonState = BUTTON_RELEASE_PENDING;
+					break;
+				}
+			}
+			else
+			{
+				userButtonState = BUTTON_RELEASE_DEBOUNCE;
+				break;
+			}
+		break;
+		default:
+		break;
+	}		
 }
 
 uint8_t readButtonRaw()
