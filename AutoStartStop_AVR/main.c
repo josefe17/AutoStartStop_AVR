@@ -10,6 +10,7 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <avr/eeprom.h>
+#include <util/delay.h>
 
 #define BUTTON_NO_PRESS 0
 #define BUTTON_SHORT_PRESS 1
@@ -140,7 +141,7 @@ int main(void)
 		processUserButton();			
 		
 		// If the system is in override mode
-		if (switchOverrideMode)
+		if (1)//(switchOverrideMode)
 		{
 			// Button control is forwarded
 			forwardButton();
@@ -153,11 +154,11 @@ int main(void)
 		// Forward the LED
 		forwardLED();
 		// Process the button pulses
-		processPulse();
+		//processPulse();
 		// EEPROM is only written if is marked for update and data have changed
 		if (markEEPROMForUpdate && (eeprom_is_ready()))
 		{
-			writeEEPROM(autoStarStopExpectedStatus,switchOverrideMode);
+			//writeEEPROM(autoStarStopExpectedStatus,switchOverrideMode);
 			markEEPROMForUpdate = 0;			
 		}
     }
@@ -205,12 +206,12 @@ void forwardButton()
 	}
 }
 
-void turnLEDOn()
+void turnLEDOff()
 {
 	PORTB &= ~(1 << PB1);
 }
 
-void turnLEDOff()
+void turnLEDOn()
 {
 	PORTB |= (1 << PB1);
 }
@@ -436,7 +437,7 @@ void processUserButton()
 
 uint8_t readButtonRaw()
 {
-	return (PINB & (1 << PB1)); // Low enabled, button pressed
+	return (PINB & (1 << PB2)); // Low enabled, button pressed
 }
 
 
@@ -492,20 +493,21 @@ uint8_t countOnes(uint8_t number)
 
 void initTimerMillis()
 {	
-	GTCCR = (1 << PSR1); // Clear prescaler
-	TCNT1 = 0; // Clear counter
-	OCR1A = 125; // Set count
-	TIFR = (1 << OCF1A); // Clear IF
-	TIMSK = (1 << OCIE1A); // Enable interrupts
-	TCCR1 = (1 << CTC1) | 3; // /64 prescaler and CTC	
+	GTCCR = (1 << PSR0); // Clear prescaler
+	TCCR0A = (1 << WGM01); // CTC
+	TCNT0 = 0; // Clear counter
+	OCR0A = 125; // Set count
+	TIFR = (1 << OCF0A); // Clear IF
+	TIMSK = (1 << OCIE0A); // Enable interrupts	
+	TCCR0B = (1 << CS01) | (1 << CS00); // 64 prescaler
 }
 
 uint16_t readTimerMillis()
 {
 	uint16_t aux;
-	TIMSK |= ~(1 << OCIE1A); // Disable timer interrupts
+	TIMSK |= ~(1 << OCIE0A); // Disable timer interrupts
 	aux = millisCount;
-	TIMSK |= (1 << OCIE1A); // Enable timer interrupts
+	TIMSK |= (1 << OCIE0A); // Enable timer interrupts
 	return aux;
 }
 
@@ -514,7 +516,7 @@ uint8_t checkDelayUntil(uint16_t instant)
 	return (uint8_t) (readTimerMillis() >= instant);
 }
 
-ISR(TIMER1_COMPA_vect)
+ISR(TIMER0_COMPA_vect)
 {
 	++millisCount;
 }
