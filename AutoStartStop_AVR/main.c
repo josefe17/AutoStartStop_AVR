@@ -123,7 +123,7 @@ int main(void)
 	// Init GPIO	
 	MCUCR &= ~(1 << PUD);
 	PORTB = (1 << PB1) | (1 << PB2);
-	DDRB = (1 << PB4) | (1 << PB1);
+	DDRB = (1 << PB3) | (1 << PB1);
 	releaseButton();
 	turnLEDOff();
 	// Read EEPROM
@@ -165,7 +165,7 @@ int main(void)
 
 uint8_t readAutoStartStopCurrentStatus() // 0 for LED on so ASS off
 {
-	if (PINB & (1 << PB3))
+	if (PINB & (1 << PB4))
 	{
 		return 0;
 	} 
@@ -185,12 +185,12 @@ void pulseButton()
 
 void holdButton()
 {
-	PORTB |= (1 << PB4);
+	PORTB |= (1 << PB3);
 }
 
 void releaseButton()
 {
-	PORTB &= ~(1 << PB4);
+	PORTB &= ~(1 << PB3);
 }
 
 void forwardButton()
