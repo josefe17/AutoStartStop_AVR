@@ -40,8 +40,6 @@ enum ButtonFSMStates
 	BUTTON_DEPRESSED
 };
 
-
-
 /*GPIO functions*/
 // Check if auto start stop is currently enabled or disabled by feedback LED signal
 // to avoid the device pulsing continuously, ensure this board is powered only while
@@ -141,7 +139,7 @@ int main(void)
 		processUserButton();			
 		
 		// If the system is in override mode
-		if (1)//(switchOverrideMode)
+		if (switchOverrideMode)
 		{
 			// Button control is forwarded
 			forwardButton();
@@ -154,11 +152,11 @@ int main(void)
 		// Forward the LED
 		forwardLED();
 		// Process the button pulses
-		//processPulse();
+		processPulse();
 		// EEPROM is only written if is marked for update and data have changed
 		if (markEEPROMForUpdate && (eeprom_is_ready()))
 		{
-			//writeEEPROM(autoStarStopExpectedStatus,switchOverrideMode);
+			writeEEPROM(autoStarStopExpectedStatus,switchOverrideMode);
 			markEEPROMForUpdate = 0;			
 		}
     }
@@ -505,7 +503,7 @@ void initTimerMillis()
 uint16_t readTimerMillis()
 {
 	uint16_t aux;
-	TIMSK |= ~(1 << OCIE0A); // Disable timer interrupts
+	TIMSK &= ~(1 << OCIE0A); // Disable timer interrupts
 	aux = millisCount;
 	TIMSK |= (1 << OCIE0A); // Enable timer interrupts
 	return aux;
