@@ -9,6 +9,7 @@
 #ifndef PHYSICALLEDDRIVER_H_
 #define PHYSICALLEDDRIVER_H_
 
+#include <avr/io.h>
 
 // Initializes feedback LED
 void initFeedbackLED();

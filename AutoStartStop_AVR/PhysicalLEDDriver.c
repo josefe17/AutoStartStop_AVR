@@ -6,7 +6,6 @@
  */ 
 
 #include "PhysicalLEDDriver.h"
-#include <avr/io.h>
 
 void initFeedbackLED()
 {
