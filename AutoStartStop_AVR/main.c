@@ -11,6 +11,7 @@
 #include <avr/interrupt.h>
 #include <avr/eeprom.h>
 #include <util/delay.h>
+#include "TimerMillis.h"
 
 #define BUTTON_NO_PRESS 0
 #define BUTTON_SHORT_PRESS 1
@@ -84,14 +85,6 @@ void writeEEPROM(uint8_t autoStarStopExpectedStatusValue, uint8_t switchOverride
 // Compute the number of 1's in a byte
 uint8_t countOnes(uint8_t number);
 
-/* Timer 1 functions */
-// Configures the Timer 1 for millis operation
-void initTimerMillis();
-// Read the Timer 1 for millis operation
-uint16_t readTimerMillis();
-// Check if that time instant is elapsed or not
-uint8_t checkDelayUntil(uint16_t instant);
-
 // Input button FSM state
 enum ButtonFSMStates userButtonState;
 // Pulse output FSM state
@@ -113,9 +106,6 @@ uint16_t pulseSettleEndingTime;
 // Time instant when a button pressure is considered valid short or long press
 uint16_t buttonPressMinimumThresholdTime;
 
-// Timer postscaler / counter
-volatile uint16_t millisCount;
-
 int main(void)
 {
 		
@@ -127,8 +117,7 @@ int main(void)
 	turnLEDOff();
 	// Read EEPROM
 	readEEPROM((uint8_t*) &autoStarStopExpectedStatus, (uint8_t*) &switchOverrideMode);		
-	// Tick timer init
-	millisCount = 0;	
+	// Tick timer init		
 	initTimerMillis();
 	sei();
 	initUserButton(); // FSM init
@@ -317,14 +306,14 @@ void processUserButton()
 				buttonPressMinimumThresholdTime = readTimerMillis() + BUTTON_DEBOUNCE_DURATION_MILLIS;
 				break;
 			}
-			else
+			else // No button
 			{
 				userButtonState = BUTTON_IDLE;
 				break;
 			}
-		break;
+			break;
 		case BUTTON_PRESSED_DEBOUNCE:
-			if (checkDelayUntil(buttonPressMinimumThresholdTime))
+			if (checkDelayUntil(buttonPressMinimumThresholdTime)) // Timeout
 			{
 				if (!readButtonRaw()) // Low enabled, button pressed
 				{
@@ -332,24 +321,25 @@ void processUserButton()
 					buttonPressMinimumThresholdTime = readTimerMillis() + BUTTON_LONG_PRESS_DURATION_MILLIS - BUTTON_DEBOUNCE_DURATION_MILLIS;
 					break;
 				}
-				else
+				else // No valid button
 				{
 					userButtonState = BUTTON_IDLE;
 					break;
 				}										
 			}
-			else
+			else // No timeout
 			{
 				userButtonState = BUTTON_PRESSED_DEBOUNCE;
 			}
-		break;
+			break;
 		case BUTTON_PRESSED:
 			if (checkDelayUntil(buttonPressMinimumThresholdTime))
 			{
 				userButtonState = BUTTON_RELEASE_PENDING;					
 				if (switchOverrideMode)
-				{
+				{					
 					switchOverrideMode = 0;
+					/*
 					// Swap expected status to force a Auto start stop toogle
 					// and make LED blink (first change by BCM, second by the forced one)
 					if (readAutoStartStopCurrentStatus())
@@ -360,6 +350,7 @@ void processUserButton()
 					{
 						autoStarStopExpectedStatus = 1;
 					}
+					*/
 				}
 				else
 				{
@@ -393,7 +384,7 @@ void processUserButton()
 					break;
 				}
 			}
-		break;
+			break;
 		case BUTTON_RELEASE_PENDING:
 			if (!readButtonRaw())
 			{
@@ -407,7 +398,7 @@ void processUserButton()
 				break;
 			}
 			break;
-			case BUTTON_RELEASE_DEBOUNCE:
+		case BUTTON_RELEASE_DEBOUNCE:
 			if (checkDelayUntil(buttonPressMinimumThresholdTime))
 			{
 				if (readButtonRaw())
@@ -427,9 +418,9 @@ void processUserButton()
 				userButtonState = BUTTON_RELEASE_DEBOUNCE;
 				break;
 			}
-		break;
+			break;
 		default:
-		break;
+			break;
 	}		
 }
 
@@ -487,34 +478,4 @@ uint8_t countOnes(uint8_t number)
 		}
 	}
 	return count;
-}
-
-void initTimerMillis()
-{	
-	GTCCR = (1 << PSR0); // Clear prescaler
-	TCCR0A = (1 << WGM01); // CTC
-	TCNT0 = 0; // Clear counter
-	OCR0A = 125; // Set count
-	TIFR = (1 << OCF0A); // Clear IF
-	TIMSK = (1 << OCIE0A); // Enable interrupts	
-	TCCR0B = (1 << CS01) | (1 << CS00); // 64 prescaler
-}
-
-uint16_t readTimerMillis()
-{
-	uint16_t aux;
-	TIMSK &= ~(1 << OCIE0A); // Disable timer interrupts
-	aux = millisCount;
-	TIMSK |= (1 << OCIE0A); // Enable timer interrupts
-	return aux;
-}
-
-uint8_t checkDelayUntil(uint16_t instant)
-{
-	return (uint8_t) (readTimerMillis() >= instant);
-}
-
-ISR(TIMER0_COMPA_vect)
-{
-	++millisCount;
 }
