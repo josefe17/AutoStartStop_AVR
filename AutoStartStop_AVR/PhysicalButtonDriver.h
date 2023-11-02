@@ -11,7 +11,12 @@
 
 #include <avr/io.h>
 
+// Initializes the button hardware.
+// To avoid glitches, this function needs to be called the first one
+// among GPIO initializations (configures global pullups).
+void initPhysicalButton();
+
 // Read the user side button line
-uint8_t readButtonRaw();
+uint8_t readPhysicalButtonRaw();
 
 #endif /* PHYSICALBUTTONDRIVER_H_ */

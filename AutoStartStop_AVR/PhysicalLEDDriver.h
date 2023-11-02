@@ -12,11 +12,13 @@
 #include <avr/io.h>
 
 // Initializes feedback LED
-void initFeedbackLED();
+void initPhysicalLED();
 // Turn feedback LED output on
-void turnLEDOn();
+void turnPhysicalLEDOn();
 // Turn feedback LED output off
-void turnLEDOff();
+void turnPhysicalLEDOff();
+// Controls the LED according to the feedback line status
+void forwardBCMSideLEDStatusToPhysicalLED();
 
 
 #endif /* PHYSICALLEDDRIVER_H_ */
