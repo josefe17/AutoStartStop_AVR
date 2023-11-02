@@ -12,6 +12,7 @@
 #include <avr/eeprom.h>
 #include <util/delay.h>
 #include "TimerMillis.h"
+#include "PhysicalButtonDriver.h"
 #include "PhysicalLEDDriver.h"
 
 #define BUTTON_NO_PRESS 0
@@ -47,8 +48,6 @@ enum ButtonFSMStates
 // to avoid the device pulsing continuously, ensure this board is powered only while
 // the feedback LED is operative
 uint8_t readAutoStartStopCurrentStatus();
-// Read the user side button line
-uint8_t readButtonRaw();
 // Hold the start stop button signal pressed
 void holdButton();
 // set the start stop button signal depressed
@@ -412,11 +411,6 @@ void processUserButton()
 		default:
 			break;
 	}		
-}
-
-uint8_t readButtonRaw()
-{
-	return (PINB & (1 << PB2)); // Low enabled, button pressed
 }
 
 
