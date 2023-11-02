@@ -9,6 +9,7 @@
 #ifndef TIMERMILLIS_H_
 #define TIMERMILLIS_H_
 
+#include <avr/io.h>
 
 /* Timer 1 functions */
 // Configures the Timer 1 for millis operation

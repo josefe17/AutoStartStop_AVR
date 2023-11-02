@@ -5,7 +5,7 @@
  *  Author: josefe
  */ 
 
-#include <avr/io.h>
+#include "TimerMillis.h"
 #include <avr/interrupt.h>
 
 // Timer postscaler / counter
