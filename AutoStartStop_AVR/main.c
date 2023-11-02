@@ -112,7 +112,11 @@ int main(void)
 	// Init GPIO	
 	MCUCR &= ~(1 << PUD);
 	PORTB = (1 << PB1) | (1 << PB2);
-	DDRB = (1 << PB3) | (1 << PB1);
+	DDRB = (1 << PB1) | (1 << PB3);
+	// PB1 physical LED output, with DDR = 1 and PORT = 1 (output high to avoid pullup glitches)
+	// PB2 physical button input, with DDR = 0 (expected default value) and PORT = 1 (input pullup)
+	// PB3 virtual button output to BCM, with DDR = 1 and PORT = 0 (expected default value) (output, no pullup)
+	// PB4 virtual LED input from BCM, with DDR = 0 and PORT = 0 (expected default values) (input, no pullup)
 	releaseButton();
 	turnLEDOff();
 	// Read EEPROM
