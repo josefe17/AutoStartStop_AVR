@@ -11,6 +11,9 @@
 
 #include <avr/io.h>
 
+#define PHYSICALLEDTHREEBLINKSDELAY_MS 80
+#define PHYSICALLEDLONGBLINKDELAY_MS 320
+
 // Initializes feedback LED
 void initPhysicalLED();
 // Turn feedback LED output on
@@ -20,5 +23,11 @@ void turnPhysicalLEDOff();
 // Controls the LED according to the feedback line status
 void forwardBCMSideLEDStatusToPhysicalLED();
 
+void initPhysicalLEDBlinkController();
+void requestPhysicalLEDThreeBlinks();
+void requestPhysicalLEDLongBlink();
+uint8_t isPhysicalLEDBlinkingSequenceRunning();
+
+void runPhysicalLEDBlinks();
 
 #endif /* PHYSICALLEDDRIVER_H_ */

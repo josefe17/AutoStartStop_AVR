@@ -18,49 +18,107 @@
 #include "BCMSideButtonDriver.h"
 #include "BCMSideLEDDriver.h"
 
-/*GPIO functions*/
-/* User buttom FSM functions*/
-// Configure the input button FSM variables
-void initUserButton();
-// Run the user side button FSM machine
-void processUserButton();
-// Output function
-void pulseButton();
-
-// Input button FSM state
-enum ButtonFSMStates userButtonState;
+void handleShortPress();
+void handleLongPress();
+void updateStartStopStatus();
+void updateFeedbackLEDStatus();
 
 // Stores the ASS consigned value that must coincide with the system one
 volatile uint8_t autoStarStopExpectedStatus;
 // Stores if the switch operating mode has changed
 volatile uint8_t switchOverrideMode;
 
-// Time instant when a button pressure is considered valid short or long press
-uint16_t buttonPressMinimumThresholdTime;
 
 int main(void)
 {
 		
-	// Init GPIO	
-	initPhysicalButton();
+	// Initialize GPIO	
+	initPhysicalButtonLine();
 	initBCMSideButtonLine();
 	initPhysicalLED();	
 	initBCMSideLED();
+	// Set initial values for outputs
 	releaseBCMSideButtonLine();
 	turnPhysicalLEDOff();
-	// initialize adn read EEPROM
+	// Initialize and read EEPROM
 	initEEPROM();
 	readEEPROM((uint8_t*) &autoStarStopExpectedStatus, (uint8_t*) &switchOverrideMode);		
-	// Tick timer init		
+	// Initialize tick timer and interrupts	
 	initTimerMillis();
 	sei();	
-	initUserButton(); // FSM init
+	// Initialize software
+	initPhysicalButtonController();
 	initBCMSideButtonPulseController();
+	initPhysicalLEDBlinkController();
+	initBCMSideLEDFilter();	
     while (1) 
     {
-		// Read button
-		processUserButton();			
-		
+		// Read and process physical button
+		runPhysicalButtonController();	
+		// Read and process BCM side LED line (feedback)
+		runBCMSideLEDFilter();		
+		// Check processed button inputs
+		handleLongPress();
+		handleShortPress();
+		// Control the start stop status according to user requests
+		updateStartStopStatus();
+		// Control the button LED according to user settings
+		updateFeedbackLEDStatus();
+		// Process physical LED blinks
+		runPhysicalLEDBlinks();
+		// Process the button pulses
+		runBCMSideButtonPulseController();
+		// EEPROM is only written if is marked for update and data have changed
+		processEEPROM(autoStarStopExpectedStatus,switchOverrideMode);
+    }
+}
+
+void handleShortPress()
+{
+	if (checkPhysicalButtonShortPress())
+	{
+		if (!switchOverrideMode)
+		{
+			if (autoStarStopExpectedStatus)
+			{
+				autoStarStopExpectedStatus = 0;
+			}
+			else
+			{
+				autoStarStopExpectedStatus = 1;
+			}
+			setEEPROMDirtyFlag();
+		}
+	}
+}
+
+void handleLongPress()
+{
+	if (checkPhysicalButtonLongPress())
+	{
+		if (switchOverrideMode)
+		{
+			switchOverrideMode = 0;
+			requestPhysicalLEDLongBlink();
+		}
+		else
+		{
+			switchOverrideMode = 1;
+			requestPhysicalLEDThreeBlinks();
+		}
+		setEEPROMDirtyFlag();
+	}
+}
+
+void updateStartStopStatus()
+{
+	// If a release is pending, disable any further actions and release the line
+	if (checkPhysicalButtonLongPressReleasePending())
+	{
+		releaseBCMSideButtonLine();
+	}
+	else
+	{
 		// If the system is in override mode
 		if (switchOverrideMode)
 		{
@@ -70,175 +128,24 @@ int main(void)
 		// Else handle the pulse
 		else
 		{
-			pulseButton();
+			if ((!readBCMSideLEDLineFiltered() && autoStarStopExpectedStatus) //ASS off but required on
+			|| (readBCMSideLEDLineFiltered() && !autoStarStopExpectedStatus)) // ASS on but required off
+			{
+				holdBCMSideButtonLine(); // Press the button until they match
+			}
+			else
+			{
+				releaseBCMSideButtonLine();
+			}
 		}
-		
-		// Forward the LED
-		forwardBCMSideLEDStatusToPhysicalLED();
-		// Process the button pulses
-		runBCMSideButtonPulseController();
-		// EEPROM is only written if is marked for update and data have changed
-		processEEPROM(autoStarStopExpectedStatus,switchOverrideMode);
-    }
-}
-
-void pulseButton()
-{
-	// If ASS feedback and expected status mismatch and not ongoing pulse, pulse the line
-	if (((!readAutoStartStopCurrentStatus() && autoStarStopExpectedStatus) //ASS off but required on
-	|| (readAutoStartStopCurrentStatus() && !autoStarStopExpectedStatus)) // ASS on but required off
-	&& !isBCMSideButtonPulseOngoing()) // No ongoing pulse
-	{
-		queuePulseForBCMSideButtonLine();
-		// TODO
-		// Think about holding the line pressed until match
 	}	
 }
 
-void initUserButton()
+void updateFeedbackLEDStatus()
 {
-	userButtonState = BUTTON_IDLE;	
-}
-
-void processUserButton()
-{
-	switch (userButtonState)
+	// Forward the LED only if no blinking is running
+	if (!isPhysicalLEDBlinkingSequenceRunning())
 	{
-		case BUTTON_IDLE:
-			if (!readPhysicalButtonRaw()) // Low enabled, button pressed
-			{
-				userButtonState = BUTTON_PRESSED_DEBOUNCE;
-				buttonPressMinimumThresholdTime = readTimerMillis() + BUTTON_DEBOUNCE_DURATION_MILLIS;
-				break;
-			}
-			else // No button
-			{
-				userButtonState = BUTTON_IDLE;
-				break;
-			}
-			break;
-		case BUTTON_PRESSED_DEBOUNCE:
-			if (readPhysicalButtonRaw()) // Button released, so unvalid, back to idle
-			{
-				userButtonState = BUTTON_IDLE;
-				break;
-			}
-			else
-			{				
-				if (checkDelayUntil(buttonPressMinimumThresholdTime)) // Timeout
-				{
-					userButtonState = BUTTON_PRESSED;
-					buttonPressMinimumThresholdTime = readTimerMillis() + BUTTON_LONG_PRESS_DURATION_MILLIS - BUTTON_DEBOUNCE_DURATION_MILLIS;
-					break;													
-				}
-				else // No timeout
-				{
-					userButtonState = BUTTON_PRESSED_DEBOUNCE;
-					break;
-				}
-				break;
-			}
-		case BUTTON_PRESSED:
-			if (checkDelayUntil(buttonPressMinimumThresholdTime))
-			{
-				userButtonState = BUTTON_RELEASE_PENDING;					
-				if (switchOverrideMode)
-				{					
-					switchOverrideMode = 0;
-					// make 1 flash to indicate memory mode on
-				}
-				else
-				{
-					switchOverrideMode = 1;
-					// make 3 fast fading flashes to indicate memory mode off
-				}
-				setEEPROMDirtyFlag();					
-				break;
-			}
-			else
-			{
-				if (!readPhysicalButtonRaw()) // Low enabled, button pressed
-				{
-					userButtonState = BUTTON_PRESSED;
-					break;
-				}
-				else
-				{
-					userButtonState = BUTTON_RELEASE_DEBOUNCE;
-					buttonPressMinimumThresholdTime = readTimerMillis() + BUTTON_DEBOUNCE_DURATION_MILLIS;
-					break;
-				}
-				break;
-			}
-			break;
-		case BUTTON_RELEASE_DEBOUNCE:
-			if (!readPhysicalButtonRaw()) // Low enabled, button pressed
-			{
-				userButtonState = BUTTON_PRESSED;
-				buttonPressMinimumThresholdTime = readTimerMillis() + BUTTON_LONG_PRESS_DURATION_MILLIS - BUTTON_DEBOUNCE_DURATION_MILLIS;
-				break;				
-			}
-			else
-			{
-				if (checkDelayUntil(buttonPressMinimumThresholdTime))
-				{
-					
-					userButtonState = BUTTON_IDLE;
-					if (!switchOverrideMode)
-					{
-						if (autoStarStopExpectedStatus)
-						{
-							autoStarStopExpectedStatus = 0;
-						}
-						else
-						{
-							autoStarStopExpectedStatus = 1;
-						}
-						setEEPROMDirtyFlag();
-					}
-					break;
-				}
-				else
-				{
-					userButtonState = BUTTON_RELEASE_DEBOUNCE;
-					break;
-				}
-			}
-			break;
-		case BUTTON_RELEASE_PENDING:
-			if (!readPhysicalButtonRaw()) // Low enabled, button pressed
-			{
-				userButtonState = BUTTON_RELEASE_PENDING;
-				break;
-			}
-			else
-			{
-				userButtonState = BUTTON_RELEASE_PENDING_DEBOUNCE;
-				buttonPressMinimumThresholdTime = readTimerMillis() + BUTTON_DEBOUNCE_DURATION_MILLIS;
-				break;
-			}
-			break;
-		case BUTTON_RELEASE_PENDING_DEBOUNCE:
-			if (!readPhysicalButtonRaw()) // Low enabled, button pressed
-			{
-				userButtonState = BUTTON_RELEASE_PENDING;				
-				break;				
-			}
-			else
-			{
-				if (checkDelayUntil(buttonPressMinimumThresholdTime))
-				{					
-					userButtonState = BUTTON_IDLE;
-					break;
-				}
-				else
-				{
-					userButtonState = BUTTON_RELEASE_PENDING_DEBOUNCE;
-					break;
-				}
-			}
-			break;			
-		default:
-			break;
-	}		
+		forwardBCMSideLEDStatusToPhysicalLED();
+	}
 }
