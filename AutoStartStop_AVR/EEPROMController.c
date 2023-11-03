@@ -49,7 +49,7 @@ void setEEPROMDirtyFlag()
 	markEEPROMForUpdate = 1;
 }
 
-void processEEPROM(uint8_t autoStarStopExpectedStatusValue, uint8_t switchOverrideModeValue)
+uint8_t processEEPROM(uint8_t autoStarStopExpectedStatusValue, uint8_t switchOverrideModeValue)
 {
 	uint8_t value = 0;
 	if (markEEPROMForUpdate && (eeprom_is_ready()))
@@ -64,7 +64,9 @@ void processEEPROM(uint8_t autoStarStopExpectedStatusValue, uint8_t switchOverri
 		}
 		eeprom_update_byte((uint8_t*) EEPROM_ADDRESS, value);
 		markEEPROMForUpdate = 0;
+		return 1;
 	}
+	return 0;
 }
 
 uint8_t countOnes(uint8_t number)

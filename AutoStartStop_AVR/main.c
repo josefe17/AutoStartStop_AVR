@@ -17,6 +17,7 @@
 #include "PhysicalLEDDriver.h"
 #include "BCMSideButtonDriver.h"
 #include "BCMSideLEDDriver.h"
+#include "DebugGPIO.h"
 
 void handleShortPress();
 void handleLongPress();
@@ -37,6 +38,7 @@ int main(void)
 	initBCMSideButtonLine();
 	initPhysicalLED();	
 	initBCMSideLED();
+	initDebugGPIOInputPullup();
 	// Set initial values for outputs
 	releaseBCMSideButtonLine();
 	turnPhysicalLEDOff();
@@ -69,7 +71,11 @@ int main(void)
 		// Process the button pulses
 		runBCMSideButtonPulseController();
 		// EEPROM is only written if is marked for update and data have changed
-		processEEPROM(autoStarStopExpectedStatus,switchOverrideMode);
+		// Also, LED is blinked once if debug pin (PB0) is shorted to ground and a writing was performed
+		if (processEEPROM(autoStarStopExpectedStatus,switchOverrideMode) && !readDebugGPIO())
+		{
+			requestPhysicalLEDShortBlink();
+		}
     }
 }
 
@@ -98,13 +104,15 @@ void handleLongPress()
 	{
 		if (switchOverrideMode)
 		{
+			// Memory mode
 			switchOverrideMode = 0;
-			requestPhysicalLEDLongBlink();
+			requestPhysicalLEDThreeBlinks();
 		}
 		else
 		{
+			// Bypass mode (factory operation)
 			switchOverrideMode = 1;
-			requestPhysicalLEDThreeBlinks();
+			requestPhysicalLEDLongBlink();			
 		}
 		setEEPROMDirtyFlag();
 	}

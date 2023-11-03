@@ -14,8 +14,10 @@ uint8_t readPhysicalLEDRawStatus();
 uint16_t LEDBlinkTimer;
 
 uint8_t threeBlinksSequenceStatus;
+uint8_t shortBlinkSequenceStatus;
 uint8_t longBlinkSequenceStatus;
 uint8_t pendingThreeBlinksFlag;
+uint8_t pendingShortBlinkFlag;
 uint8_t pendingLongBlinkFlag;
 
 void initPhysicalLED()
@@ -67,34 +69,48 @@ void requestPhysicalLEDThreeBlinks()
 
 void requestPhysicalLEDLongBlink()
 {
-	pendingLongBlinkFlag = 0;	
+	pendingLongBlinkFlag = 1;	
+}
+
+void requestPhysicalLEDShortBlink()
+{
+	pendingShortBlinkFlag = 1;
 }
 
 uint8_t isPhysicalLEDBlinkingSequenceRunning()
 {
-	return (threeBlinksSequenceStatus + longBlinkSequenceStatus) > 0;
+	return (threeBlinksSequenceStatus + longBlinkSequenceStatus + shortBlinkSequenceStatus) > 0;
 }
 
 void runPhysicalLEDBlinks()
 {
 	// If a three blinks is pending and no sequence is running
-	if (pendingThreeBlinksFlag && threeBlinksSequenceStatus == 0 && longBlinkSequenceStatus == 0)
+	if (pendingThreeBlinksFlag && !isPhysicalLEDBlinkingSequenceRunning())
 	{
 		// Clear flag and start it
-		pendingThreeBlinksFlag = 0;
-		threeBlinksSequenceStatus = 3;			
+		pendingThreeBlinksFlag = 0;		
+		threeBlinksSequenceStatus = 3;		
 		turnPhysicalLEDOn();
 		LEDBlinkTimer = readTimerMillis() + PHYSICALLEDTHREEBLINKSDELAY_MS;
 	}
+	// If a short blink is pending and no sequence is running
+	if (pendingShortBlinkFlag &&!isPhysicalLEDBlinkingSequenceRunning())
+	{
+		// Clear flag and start it
+		pendingShortBlinkFlag = 0;
+		shortBlinkSequenceStatus = 1;
+		turnPhysicalLEDOn();
+		LEDBlinkTimer = readTimerMillis() + PHYSICALLEDSHORTBLINKDELAY_MS;
+	}
 	// If a three blinks is pending and no sequence is running
-	if (pendingLongBlinkFlag && threeBlinksSequenceStatus == 0 && longBlinkSequenceStatus == 0)
+	if (pendingLongBlinkFlag && !isPhysicalLEDBlinkingSequenceRunning())
 	{
 		// Clear flag and start it
 		pendingLongBlinkFlag = 0;
 		longBlinkSequenceStatus = 1;
 		turnPhysicalLEDOn();
 		LEDBlinkTimer = readTimerMillis() + PHYSICALLEDLONGBLINKDELAY_MS;
-	}
+	}	
 	// If the three LEDs sequence is running
 	if (threeBlinksSequenceStatus > 0)
 	{
@@ -120,7 +136,27 @@ void runPhysicalLEDBlinks()
 			}
 		}
 	}
-	// Same for long blink
+	// Same for short and long blinks
+	if (shortBlinkSequenceStatus > 0)
+	{
+		if (checkDelayUntil(LEDBlinkTimer))
+		{
+			if (readPhysicalLEDRawStatus() == 0)
+			{
+				--shortBlinkSequenceStatus;
+				if (shortBlinkSequenceStatus > 0)
+				{
+					turnPhysicalLEDOn();
+					LEDBlinkTimer = readTimerMillis() + PHYSICALLEDSHORTBLINKDELAY_MS;
+				}
+			}
+			else
+			{
+				turnPhysicalLEDOff();
+				LEDBlinkTimer = readTimerMillis() + PHYSICALLEDSHORTBLINKDELAY_MS;
+			}
+		}
+	}
 	if (longBlinkSequenceStatus > 0)
 	{
 		if (checkDelayUntil(LEDBlinkTimer))

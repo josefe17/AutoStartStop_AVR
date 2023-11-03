@@ -18,6 +18,6 @@ void readEEPROM(uint8_t* autoStarStopExpectedStatusPointer, uint8_t* switchOverr
 // Requires the EEPROM to be written
 void setEEPROMDirtyFlag();
 // Write the flag contents to the EEPROM
-void processEEPROM(uint8_t autoStarStopExpectedStatusValue, uint8_t switchOverrideModeValue);
+uint8_t processEEPROM(uint8_t autoStarStopExpectedStatusValue, uint8_t switchOverrideModeValue);
 
 #endif /* EEPROMCONTROLLER_H_ */
