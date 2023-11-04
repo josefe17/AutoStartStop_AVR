@@ -53,6 +53,10 @@ int main(void)
 	initBCMSideButtonPulseController();
 	initPhysicalLEDBlinkController();
 	initBCMSideLEDFilter();	
+	uint16_t startUpDelayTimer = readTimerMillis() + STARTUP_DELAY_MILLIS;
+	while (checkDelayUntil(startUpDelayTimer))
+	{
+	}
     while (1) 
     {
 		// Read and process physical button
