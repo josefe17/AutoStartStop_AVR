@@ -26,6 +26,8 @@ void releaseBCMSideButtonLine();
 void forwardPhysicalButtonStatusToBCMSideButtonLine();
 // Queue pulse for button line
 void queuePulseForBCMSideButtonLine();
+// Ends current pulse and releases line
+void abortBCMSideButtonOngoingPulse();
 // Check if a pulse is ongoing
 uint8_t isBCMSideButtonPulseOngoing();
 

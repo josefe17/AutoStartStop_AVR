@@ -14,11 +14,16 @@
 enum ButtonFSMStates pulseButtonState;
 // Counter of the number of pending pulse requests
 uint8_t pulseRequests;
+// Flag for aborting ogoing pulses
+uint8_t abortOngoingPulseRequestFlag;
 // Time instant when the simulated button depression ends
 uint16_t pulseDurationEndingTime;
 // Time instant when the simulated button settling time ends
 uint16_t pulseSettleEndingTime;
 	
+// Checks if the abort flag is set and clears it
+uint8_t checkAbortOngoingPulseRequestFlag();
+
 void initBCMSideButtonLine()
 {
 	// PB3 virtual button output to BCM, with DDR = 1 and PORT = 0 (expected default value) (output, no pullup)
@@ -40,10 +45,18 @@ void initBCMSideButtonPulseController()
 {
 	pulseButtonState = BUTTON_IDLE;
 	pulseRequests = 0;
+	abortOngoingPulseRequestFlag = 0;
 }
 
 void runBCMSideButtonPulseController()
 {
+	if (checkAbortOngoingPulseRequestFlag())
+	{
+		pulseRequests = 0;
+		releaseBCMSideButtonLine();
+		pulseButtonState = BUTTON_IDLE;
+		return;
+	}
 	switch (pulseButtonState)
 	{
 		case BUTTON_IDLE:
@@ -104,6 +117,21 @@ void queuePulseForBCMSideButtonLine()
 	{
 		++pulseRequests;
 	}
+}
+
+void abortBCMSideButtonOngoingPulse()
+{
+	abortOngoingPulseRequestFlag = 1;
+}
+
+uint8_t checkAbortOngoingPulseRequestFlag()
+{
+	if (abortOngoingPulseRequestFlag)
+	{
+		abortOngoingPulseRequestFlag = 0;
+		return 1;
+	}
+	return 0;
 }
 
 uint8_t isBCMSideButtonPulseOngoing()

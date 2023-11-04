@@ -129,25 +129,25 @@ void updateStartStopStatus()
 	{
 		releaseBCMSideButtonLine();
 	}
+	// If no pulse is ongoing update output
 	else
 	{
 		// If the system is in override mode
 		if (switchOverrideMode)
 		{
+			// Current pulse is stopped
+			abortBCMSideButtonOngoingPulse();
 			// Button control is forwarded
 			forwardPhysicalButtonStatusToBCMSideButtonLine();
 		}
 		// Else handle the pulse
 		else
 		{
-			if ((!readBCMSideLEDLineFiltered() && autoStarStopExpectedStatus) //ASS off but required on
+			if (((!readBCMSideLEDLineFiltered() && autoStarStopExpectedStatus) //ASS off but required on
 			|| (readBCMSideLEDLineFiltered() && !autoStarStopExpectedStatus)) // ASS on but required off
+			&& !isBCMSideButtonPulseOngoing())
 			{
-				holdBCMSideButtonLine(); // Press the button until they match
-			}
-			else
-			{
-				releaseBCMSideButtonLine();
+				queuePulseForBCMSideButtonLine();
 			}
 		}
 	}	
