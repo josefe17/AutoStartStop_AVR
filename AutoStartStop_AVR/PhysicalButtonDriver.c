@@ -115,27 +115,41 @@ void runPhysicalButtonController()
 			break;
 		}
 		case BUTTON_PRESSED:
-		if (checkDelayUntil(buttonPressMinimumThresholdTime))
+		if (readPhysicalButtonRaw()) // If button is released
 		{
-			userButtonState = BUTTON_LONG_PRESS_RELEASE_PENDING;
-			longPressFlag = 1;
-			lonPressReleasePendingFlag = 1;
-			break;
-		}
-		else
-		{
-			if (!readPhysicalButtonRaw()) // Low enabled, button pressed
+			if (checkDelayUntil(buttonPressMinimumThresholdTime)) // If long press timer is (just) expired
+			// Go to long press mode
 			{
-				userButtonState = BUTTON_PRESSED;
+				userButtonState = BUTTON_LONG_PRESS_RELEASE_PENDING;
+				longPressFlag = 1;
+				lonPressReleasePendingFlag = 1;
 				break;
 			}
 			else
+			// Go to short press mode
 			{
 				userButtonState = BUTTON_RELEASE_DEBOUNCE;
 				buttonPressMinimumThresholdTime = readTimerMillis() + BUTTON_DEBOUNCE_DURATION_MILLIS;
 				break;
 			}
-			break;
+			
+		}
+		else // Button is still pressed
+		{
+			if (checkDelayUntil(buttonPressMinimumThresholdTime)) //Long press timer is already expired
+			// Go to long press mode
+			{
+				userButtonState = BUTTON_LONG_PRESS_RELEASE_PENDING;
+				longPressFlag = 1;
+				lonPressReleasePendingFlag = 1;
+				break;
+			}
+			else
+			// Keep polling
+			{
+				userButtonState = BUTTON_PRESSED;
+				break;
+			}
 		}
 		break;
 		case BUTTON_RELEASE_DEBOUNCE:

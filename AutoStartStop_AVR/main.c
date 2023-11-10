@@ -28,7 +28,8 @@ void updateFeedbackLEDStatus();
 volatile uint8_t autoStarStopExpectedStatus;
 // Stores if the switch operating mode has changed
 volatile uint8_t switchOverrideMode;
-
+// Stores the startup delay timer instant
+volatile uint16_t startUpDelayTimer;
 
 int main(void)
 {
@@ -53,10 +54,8 @@ int main(void)
 	initBCMSideButtonPulseController();
 	initPhysicalLEDBlinkController();
 	initBCMSideLEDFilter();	
-	uint16_t startUpDelayTimer = readTimerMillis() + STARTUP_DELAY_MILLIS;
-	while (checkDelayUntil(startUpDelayTimer))
-	{
-	}
+	startUpDelayTimer = readTimerMillis() + STARTUP_DELAY_MILLIS;
+	while (!checkDelayUntil(startUpDelayTimer));	
     while (1) 
     {
 		// Read and process physical button
